@@ -12,13 +12,14 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Define PyTorch model architecture\ nclass FakeNewsClassifier(nn.Module):
-def __init__(self, input_dim):
-    super(FakeNewsClassifier, self).__init__()
-    self.fc = nn.Linear(input_dim, 2)
+# Define PyTorch model architecture
+class FakeNewsClassifier(nn.Module):
+    def __init__(self, input_dim):
+        super(FakeNewsClassifier, self).__init__()
+        self.fc = nn.Linear(input_dim, 2)
 
-def forward(self, x):
-    return self.fc(x)
+    def forward(self, x):
+        return self.fc(x)
 
 # Text preprocessing
 def preprocess_text(text: str) -> str:
@@ -26,7 +27,8 @@ def preprocess_text(text: str) -> str:
     text = re.sub(f"[{string.punctuation}]", "", text)
     return text
 
-# Initialize Flask\ napp = Flask(__name__)
+# Initialize Flask
+app = Flask(__name__)
 CORS(app)
 
 # Health check endpoint
@@ -55,7 +57,7 @@ pytorch_model.eval()
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    data = request.json or {}
+    data = request.get_json(force=True)
     text = data.get("text", "")
     if not text:
         return jsonify({"error": "No text provided"}), 400
@@ -64,10 +66,10 @@ def predict():
     cleaned = preprocess_text(text)
     vec = vectorizer.transform([cleaned])
 
-    # Log the input size
-    logger.info(f"Received text of length {len(text)}")
+    # Log the input length
+    logger.info(f"Received text length: {len(text)}")
 
-    # Sklearn predictions
+    # Scikit-learn predictions
     sk_preds = {name: int(model.predict(vec)[0]) for name, model in models.items()}
 
     # PyTorch prediction (optional)
@@ -75,11 +77,11 @@ def predict():
     # pt_output = pytorch_model(tensor_input)
     # sk_preds["PyTorch Model"] = torch.argmax(pt_output, dim=1).item()
 
-    # Map and return
-    response = {name: ("Real" if p==1 else "Fake") for name, p in sk_preds.items()}
+    # Map to labels
+    response = {name: ("Real" if p == 1 else "Fake") for name, p in sk_preds.items()}
     return jsonify(response)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"Starting server on 0.0.0.0:{port}")
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port)
