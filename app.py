@@ -29,12 +29,44 @@ def preprocess_text(text: str) -> str:
 
 # Initialize Flask
 app = Flask(__name__)
-CORS(app)
+# Enable CORS with explicit methods and headers
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-# Health check endpoint
-@app.route("/", methods=["GET"])
-def health():
-    return jsonify({"status": "ok"}), 200
+# Global CORS headers for preflight
+@app.after_request
+def apply_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+    return response
+
+# Root endpoint: health check on GET, prediction on POST
+@app.route("/", methods=["GET", "POST", "OPTIONS"])
+def root():
+    if request.method == "OPTIONS":
+        return jsonify({}), 204
+    if request.method == "GET":
+        return jsonify({"status": "ok"}), 200
+    # POST -> delegate to predict
+    return predict()
+
+# Predict endpoint remains available
+@app.route("/predict", methods=["POST", "OPTIONS"])
+def predict():
+    if request.method == "OPTIONS":
+        return jsonify({}), 204
+    data = request.get_json(force=True) or {}
+    text = data.get("text", "")
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+
+    cleaned = preprocess_text(text)
+    vec = vectorizer.transform([cleaned])
+
+    logger.info(f"Received text length: {len(text)}")
+    sk_preds = {name: int(model.predict(vec)[0]) for name, model in models.items()}
+    response = {name: ("Real" if p == 1 else "Fake") for name, p in sk_preds.items()}
+    return jsonify(response)
 
 # Load models directory
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
@@ -54,32 +86,6 @@ pytorch_model = FakeNewsClassifier(input_dim)
 pth_path = os.path.join(MODEL_DIR, "fake_news_model.pth")
 pytorch_model.load_state_dict(torch.load(pth_path, map_location="cpu"))
 pytorch_model.eval()
-
-@app.route("/predict", methods=["POST"])
-def predict():
-    data = request.get_json(force=True)
-    text = data.get("text", "")
-    if not text:
-        return jsonify({"error": "No text provided"}), 400
-
-    # Preprocess and vectorize
-    cleaned = preprocess_text(text)
-    vec = vectorizer.transform([cleaned])
-
-    # Log the input length
-    logger.info(f"Received text length: {len(text)}")
-
-    # Scikit-learn predictions
-    sk_preds = {name: int(model.predict(vec)[0]) for name, model in models.items()}
-
-    # PyTorch prediction (optional)
-    # tensor_input = torch.tensor(vec.toarray(), dtype=torch.float32)
-    # pt_output = pytorch_model(tensor_input)
-    # sk_preds["PyTorch Model"] = torch.argmax(pt_output, dim=1).item()
-
-    # Map to labels
-    response = {name: ("Real" if p == 1 else "Fake") for name, p in sk_preds.items()}
-    return jsonify(response)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
